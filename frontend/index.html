@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MdViewer</title><link rel="icon" href="/favicon.ico"><link rel="stylesheet" href="/app.css"><script type="module" src="/app.js"></script></head>
+<body>
+  <header id="tabs-bar"><button id="open" title="Open File (Ctrl+O)">Open file</button><button id="left" title="Scroll tabs left" aria-label="Scroll tabs left">&lt;</button><div id="tabs" role="tablist" aria-label="Open documents"></div><button id="right" title="Scroll tabs right" aria-label="Scroll tabs right">&gt;</button><button id="new" title="New Tab (Ctrl+T)" aria-label="Open a file in a new tab">+</button></header>
+  <section id="find-bar" hidden aria-label="Find in document"><input id="query" type="search" placeholder="Find in document" aria-label="Find text"><label><input id="case" type="checkbox">Aa</label><span id="count" aria-live="polite">0 of 0</span><button id="previous" title="Previous (Shift+F3)">Previous</button><button id="next" title="Next (F3)">Next</button><button id="close-find" aria-label="Close find">x</button></section>
+  <main id="viewport" tabindex="0"><article id="content"></article><section id="empty"><h1>MdViewer</h1><p>Markdown, without the editor.</p><button id="empty-open">Open file</button><p class="muted">Ctrl+O or drop Markdown files here</p></section></main>
+  <footer><span id="zoom">100%</span><span id="path"></span><span id="notice" role="status"></span></footer>
+  <dialog id="custom"><form method="dialog"><h2>Custom theme</h2><p>Pick a base and an accent. Readable colors are derived automatically.</p><label>Base <input id="base" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Base hex color"><button type="button" id="pick-base">Choose...</button></label><label>Accent <input id="accent" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Accent hex color"><button type="button" id="pick-accent">Choose...</button></label><button type="button" id="complement">Suggest complementary</button><p id="contrast" role="status"></p><div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button value="apply">Apply</button></div></form></dialog>
+</body>
+</html>

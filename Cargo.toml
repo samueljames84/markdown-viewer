@@ -1,0 +1,42 @@
+[package]
+name = "mdviewer"
+version = "0.1.0"
+edition = "2024"
+description = "Portable, offline, view-only Markdown viewer for Windows"
+license = "MIT"
+build = "build.rs"
+
+[dependencies]
+anyhow = "1"
+encoding_rs = "0.8"
+miniz_oxide = "0.8"
+muda = { version = "0.17", default-features = false }
+notify = { version = "8", default-features = false }
+percent-encoding = "2"
+rfd = { version = "0.15", default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+same-file = "1"
+tao = { version = "0.37", default-features = false, features = ["rwh_06"] }
+url = "2"
+wry = { version = "0.57", default-features = false, features = ["os-webview"] }
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+  "Win32_Foundation", "Win32_Graphics_Gdi", "Win32_Security",
+  "Win32_Security_Authorization", "Win32_Storage_FileSystem",
+  "Win32_System_Com", "Win32_System_Environment", "Win32_System_LibraryLoader",
+  "Win32_System_Memory", "Win32_System_DataExchange", "Win32_System_Pipes", "Win32_System_Registry",
+  "Win32_System_Threading", "Win32_System_IO",
+  "Win32_UI_Controls_Dialogs", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"
+] }
+
+[build-dependencies]
+winresource = "0.1"
+miniz_oxide = "0.8"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

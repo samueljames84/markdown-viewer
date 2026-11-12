@@ -1,0 +1,28 @@
+{
+  "name": "mdviewer-development",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "vendor": "node vendor.mjs",
+    "test": "node --test ..\\tests\\frontend\\*.test.mjs",
+    "test:native": "node native-test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "markdown-it": "14.3.3",
+    "markdown-it-task-lists": "2.1.1",
+    "markdown-it-footnote": "4.0.0",
+    "markdown-it-sub": "2.0.0",
+    "markdown-it-sup": "2.0.0",
+    "markdown-it-ins": "4.0.0",
+    "markdown-it-mark": "4.0.0",
+    "markdown-it-deflist": "3.0.0",
+    "markdown-it-abbr": "2.0.0",
+    "markdown-it-emoji": "3.0.0",
+    "dompurify": "3.4.17",
+    "katex": "0.19.1",
+    "mermaid": "12.3.0",
+    "highlight.js": "11.11.1",
+    "@playwright/test": "1.56.1"
+  }
+}
