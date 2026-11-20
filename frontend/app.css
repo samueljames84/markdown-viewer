@@ -67,9 +67,65 @@ footer { display:flex;gap:12px;align-items:center;border-top:1px solid var(--bor
 ::highlight(find-current) { background:#ed892c;color:#111;text-decoration:underline; }
 #content mark.find-all { background:#ffe178;color:#111; }
 #content mark.find-current { background:#ed892c;color:#111;outline:1px solid #111; }
-dialog { color:var(--text);background:var(--base);border:1px solid var(--border);border-radius:6px;max-width:500px; }
+dialog { color:var(--text);background:var(--base);border:1px solid var(--border);border-radius:6px;width:min(760px,calc(100vw - 32px)); }
 dialog::backdrop { background:#0005; }
-dialog label { display:flex;align-items:center;gap:10px;margin:12px 0; }
-dialog label input { margin-left:auto;width:110px; }
+dialog form > p { color:var(--muted); }
+#theme-colors { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 20px; }
+#theme-colors label { display:flex;align-items:center;justify-content:space-between;gap:8px;margin:3px 0; }
+#theme-colors label span { display:flex;align-items:center;gap:6px; }
+#theme-colors input[type=color] { width:34px;height:28px;padding:2px;background:var(--surface);border:1px solid var(--border);border-radius:3px; }
+#theme-colors input[type=text] { width:88px;font-family:Consolas,monospace; }
+#contrast { min-height:1.4em; }
 .dialog-actions { display:flex;gap:8px;justify-content:flex-end; }
+.dialog-actions #reset-sepia { margin-right:auto; }
+@media (max-width:600px) { #theme-colors { grid-template-columns:1fr; } }
 @media (prefers-reduced-motion:no-preference) { button { transition:border-color .1s; } }
+
+#print-content { display:none; }
+#print-content.preparing { display:block;position:absolute;left:-10000px;top:0;width:180mm;visibility:hidden; }
+#print-content.preparing.landscape { width:267mm; }
+#print-options { max-width:440px; }
+#pdf-orientation { font:inherit;color:var(--text);background:var(--surface);border:1px solid var(--border);padding:4px; }
+#print-status:empty { display:none; }
+@page { size:A4 portrait; margin:15mm; }
+@page numbered {
+  size:A4 portrait;
+  margin:15mm;
+  @bottom-center { content:"Page " counter(page) " of " counter(pages); color:#000; font:10pt "Segoe UI",sans-serif; }
+}
+@page landscape { size:A4 landscape; }
+@page landscape-numbered {
+  size:A4 landscape;
+  @bottom-center { content:"Page " counter(page) " of " counter(pages); color:#000; font:10pt "Segoe UI",sans-serif; }
+}
+@media print {
+  html,body { display:block;width:auto;height:auto;overflow:visible;background:#fff;color:#000;color-scheme:light; }
+  body > :not(#print-content) { display:none!important; }
+  dialog::backdrop { display:none; }
+  #print-content, #print-content.preparing {
+    display:block;position:static;width:auto;visibility:visible;
+    background:#fff;color:#000;font:11pt/1.45 "Segoe UI",sans-serif;overflow-wrap:anywhere;
+    print-color-adjust:economy;
+  }
+  #print-content.numbered { page:numbered; }
+  #print-content.landscape { page:landscape; }
+  #print-content.landscape.numbered { page:landscape-numbered; }
+  #print-content.preparing.landscape { width:auto; }
+  #print-content > :first-child { margin-top:0; }
+  #print-content h1, #print-content h2, #print-content h3,
+  #print-content h4, #print-content h5, #print-content h6 { break-after:avoid; }
+  #print-content p { orphans:3;widows:3; }
+  #print-content a { color:#000;text-decoration:underline; }
+  #print-content pre { white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #bbb;padding:6pt; }
+  #print-content code { font:0.9em Consolas,monospace; }
+  #print-content blockquote { margin-left:0;padding-left:9pt;border-left:2px solid #777; }
+  #print-content table { border-collapse:collapse;table-layout:fixed;width:100%; }
+  #print-content th,#print-content td { border:1px solid #888;padding:4pt; }
+  #print-content .align-left { text-align:left; }
+  #print-content .align-center { text-align:center; }
+  #print-content .align-right { text-align:right; }
+  #print-content tr,#print-content .mermaid { break-inside:avoid; }
+  #print-content img,#print-content .mermaid svg { max-width:100%;max-height:250mm;height:auto; }
+  #print-content.landscape :is(img,.mermaid svg) { max-height:175mm; }
+  #print-content mark { color:#000;background:none;font-weight:bold; }
+}

@@ -13,7 +13,7 @@ export async function server() {
       res.setHeader('Content-Security-Policy', csp); res.setHeader('Cache-Control', 'no-store');
       if (path === '/test-bridge.js') {
         res.setHeader('Content-Type', 'text/javascript');
-        res.end(`window.testMessages=[];window.ipc={postMessage:s=>{const m=JSON.parse(s);testMessages.push(m);if(m.type==='ready')setTimeout(()=>window.receive({type:'tabs',tabs:[{id:1,name:'plain.md',display:'D:\\\\\\\\test\\\\\\\\plain.md',scroll:0},{id:2,name:'features.md',display:'D:\\\\\\\\test\\\\\\\\features.md',scroll:0}],active:1,theme:'light',colors:['#ffffff','#2864b4'],zoom:100}),0)}};`); return;
+        res.end(`window.testMessages=[];window.ipc={postMessage:s=>{const m=JSON.parse(s);testMessages.push(m);if(m.type==='ready')setTimeout(()=>window.receive({type:'tabs',tabs:[{id:1,name:'plain.md',display:'D:\\\\\\\\test\\\\\\\\plain.md',scroll:0},{id:2,name:'features.md',display:'D:\\\\\\\\test\\\\\\\\features.md',scroll:0}],active:1,theme:'light',colors:['#ffffff','#2864b4'],customColors:{},zoom:100}),0)}};`); return;
       }
       if (path.startsWith('/document/')) {
         const name = path === '/document/1' ? 'plain.md' : 'features.md';

@@ -1,4 +1,4 @@
-import { applyTheme, complement, contrast, luminance } from './themes.js';
+import { applyTheme, contrast, luminance, palette } from './themes.js';
 import { Find } from './find.js';
 import { sanitize, trustedMath, trustedDiagram } from './sanitize.js';
 
@@ -7,12 +7,16 @@ const viewport = $('viewport'), content = $('content'), tabstrip = $('tabs');
 const find = new Find(content, viewport, $('count'));
 const worker = new Worker('/renderer.worker.js', { type: 'module' });
 const cache = new Map(), revisions = new Map(), pending = new Map();
-let tabs = [], active = null, theme = 'light', colors = ['#ffffff', '#2864b4'], zoom = 100;
+let tabs = [], active = null, theme = 'light', colors = ['#ffffff', '#2864b4'], customColors = {}, zoom = 100;
 let generation = 0, scrollTimer, findTimer, dragging = null, currentPalette, anchor = null;
-let preview = null, diagramSerial = 0, restoring = false, scrollEpoch = 0;
+let preview = null, editColors = {}, resetSepia = false, diagramSerial = 0, restoring = false, scrollEpoch = 0, activePath = '';
 let firstRender = true;
 let previewTimer;
 let mathStyles;
+let renderedId = null, outputMode = null;
+const printOptions = $('print-options'), printContent = $('print-content');
+const diagramSources = new WeakMap();
+const colorNames = ['base', 'text', 'surface', 'accent', 'link', 'border', 'code', 'stripe', 'selection', 'selection-text', 'muted', 'syntax', 'number', 'comment'];
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
 function send(value) { window.ipc.postMessage(JSON.stringify(value)); }
 function report(error) {
@@ -22,7 +26,7 @@ function report(error) {
 }
 window.addEventListener('error', event => report(event.message));
 window.addEventListener('unhandledrejection', event => report(event.reason));
-function persistPreferences() { send({ type: 'preferences', theme, colors, zoom }); }
+function persistPreferences() { send({ type: 'preferences', theme, colors, customColors, zoom }); }
 function saveScroll() {
   clearTimeout(scrollTimer);
   if (active == null || restoring) return;
@@ -30,7 +34,7 @@ function saveScroll() {
   if (tab) { tab.scroll = viewport.scrollTop; send({ type: 'scroll', id: active, scroll: tab.scroll }); }
 }
 function preferences() {
-  currentPalette = applyTheme(theme, colors);
+  currentPalette = applyTheme(theme, colors, customColors);
   document.documentElement.style.setProperty('--zoom', zoom / 100);
   $('zoom').textContent = `${zoom}%`;
 }
@@ -81,6 +85,7 @@ worker.onerror = event => report(`Markdown worker failed: ${event.message}`);
 
 async function display(entry) {
   const id = active, token = ++generation, epoch = scrollEpoch;
+  renderedId = null;
   find.clear(); restoring = true;
   $('notice').textContent = '';
   const scroll = tabs.find(t => t.id === id)?.scroll || 0;
@@ -116,23 +121,24 @@ async function display(entry) {
   if (entry.needs.mermaid) await diagrams(token, settle);
   if (entry.needs.math) { await mathStyles; await document.fonts.ready; }
   if (token === generation) {
+    renderedId = id;
     settle(); evict();
     if (firstRender) { firstRender = false; send({ type: 'metric', stage: 'active-content' }); }
   }
 }
 
-async function diagrams(token, settle) {
-  const sources = [...content.querySelectorAll('.mermaid-source')];
+async function diagrams(token, settle, root = content, colors = currentPalette) {
+  const sources = [...root.querySelectorAll('.mermaid-source')];
   if (!sources.length) return;
   const mermaid = (await import('/vendor/mermaid/mermaid.js')).default;
   if (token !== generation) return;
   mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', suppressErrorRendering: true,
     htmlLabels: false, flowchart: { htmlLabels: false }, maxTextSize: 200000, maxEdges: 2000,
     secure: ['securityLevel', 'startOnLoad', 'htmlLabels', 'maxTextSize', 'maxEdges', 'secure'],
-    theme: 'base', themeVariables: { darkMode: luminance(currentPalette.base) < 0.18,
-      background: currentPalette.base, primaryColor: currentPalette.surface, primaryTextColor: currentPalette.text,
-      primaryBorderColor: currentPalette.accent, lineColor: currentPalette.muted, textColor: currentPalette.text,
-      secondaryColor: currentPalette.code, tertiaryColor: currentPalette.stripe } });
+    theme: 'base', themeVariables: { darkMode: luminance(colors.base) < 0.18,
+      background: colors.base, primaryColor: colors.surface, primaryTextColor: colors.text,
+      primaryBorderColor: colors.accent, lineColor: colors.muted, textColor: colors.text,
+      secondaryColor: colors.code, tertiaryColor: colors.stripe } });
   for (const source of sources) {
     await tick(); if (token !== generation) return;
     try {
@@ -140,6 +146,7 @@ async function diagrams(token, settle) {
       const { svg } = await mermaid.render(`diagram-${++diagramSerial}`, code);
       if (token !== generation) return;
       const div = document.createElement('div'); div.className = 'mermaid'; div.append(trustedDiagram(svg)); source.replaceWith(div);
+      diagramSources.set(div, source);
       settle();
     } catch (error) {
       if (token !== generation) return;
@@ -149,6 +156,66 @@ async function diagrams(token, settle) {
     }
   }
 }
+function showOutput(mode) {
+  if (outputMode || printOptions.open || $('custom').open) return;
+  if (active == null || renderedId !== active) {
+    $('notice').textContent = 'Open a document and wait for it to finish rendering.';
+    return;
+  }
+  printOptions.dataset.mode = mode;
+  $('print-heading').textContent = mode === 'pdf' ? 'Save as PDF' : 'Print';
+  $('pdf-format').hidden = mode !== 'pdf';
+  $('pdf-orientation').value = 'portrait';
+  $('print-submit').textContent = mode === 'pdf' ? 'Choose PDF File...' : 'Choose Printer...';
+  $('print-status').textContent = '';
+  printOptions.showModal();
+}
+function finishOutput(message = '') {
+  outputMode = null;
+  printContent.replaceChildren();
+  printContent.className = '';
+  $('notice').textContent = message;
+  $('notice').title = message;
+}
+$('print-cancel').onclick = () => printOptions.close();
+printOptions.querySelector('form').onsubmit = async event => {
+  event.preventDefault();
+  if (outputMode) return;
+  if (active == null || renderedId !== active) {
+    $('print-status').textContent = 'Wait for the active document to finish rendering.';
+    return;
+  }
+  const id = active, token = generation;
+  outputMode = printOptions.dataset.mode;
+  const mode = outputMode;
+  const orientation = mode === 'pdf' ? $('pdf-orientation').value : 'portrait';
+  printOptions.close();
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(content);
+    const snapshot = range.cloneContents();
+    const originals = [...content.querySelectorAll('.mermaid')];
+    for (const [i, diagram] of [...snapshot.querySelectorAll('.mermaid')].entries()) {
+      const source = diagramSources.get(originals[i]);
+      if (source) diagram.replaceWith(source.cloneNode(true));
+    }
+    printContent.classList.toggle('numbered', $('print-numbers').checked);
+    printContent.classList.toggle('landscape', orientation === 'landscape');
+    printContent.classList.add('preparing');
+    printContent.replaceChildren(snapshot);
+    for (const mark of printContent.querySelectorAll('mark[data-find]')) mark.replaceWith(...mark.childNodes);
+    const images = [...printContent.querySelectorAll('img[src]')];
+    for (const image of images) image.loading = 'eager';
+    await diagrams(token, () => {}, printContent, palette('#ffffff', '#555555'));
+    await Promise.allSettled(images.map(image => image.decode()));
+    // Math fonts were already loaded before this render became printable.
+    if (generation !== token) throw new Error('The active document changed. Please try again.');
+    send({ type: 'documentOutput', id, mode, orientation });
+  } catch (error) {
+    finishOutput(); report(error);
+  }
+};
+window.addEventListener('afterprint', () => { if (outputMode === 'print') finishOutput(); });
 function applyAnchor() {
   if (anchor?.id !== active) return;
   let value;
@@ -206,6 +273,8 @@ function hideFind() { $('find-bar').hidden = true; find.clear(); viewport.focus(
 function changeZoom(value) { saveScroll(); zoom = Math.max(50, Math.min(300, value)); preferences(); persistPreferences(); }
 function command(name) {
   switch (name) {
+    case 'print': showOutput('print'); break;
+    case 'save-pdf': showOutput('pdf'); break;
     case 'open': case 'open-new': send({ type: 'command', command: name }); break;
     case 'close': if (active != null) { saveScroll(); send({ type: 'close', id: active }); } break;
     case 'close-all': saveScroll(); for (const tab of tabs) send({ type: 'close', id: tab.id }); break;
@@ -220,6 +289,9 @@ function command(name) {
     case 'light': case 'dark':
       saveScroll(); theme = name; preferences(); persistPreferences();
       if (cache.has(active)) void display(cache.get(active)); break;
+    case 'sepia': case 'reset-theme':
+      saveScroll(); theme = 'sepia'; customColors = {}; preferences(); persistPreferences();
+      if (cache.has(active)) void display(cache.get(active)); break;
     case 'custom': openCustom(); break;
   }
 }
@@ -233,12 +305,14 @@ function invalidate(ids, missing = []) {
 }
 window.receive = message => {
   switch (message.type) {
+    case 'outputDone': finishOutput(message.message); break;
     case 'tabs': {
       const previous = active, existing = new Map(tabs.map(t => [t.id, t]));
       tabs = message.tabs.map(t => ({ ...t, scroll: existing.get(t.id)?.scroll ?? t.scroll }));
-      active = message.active; theme = message.theme; colors = message.colors; zoom = message.zoom;
+      active = message.active; theme = message.theme; colors = message.colors;
+      customColors = message.customColors || {}; zoom = message.zoom;
       preferences(); drawTabs();
-      $('path').textContent = tabs.find(t => t.id === active)?.display || ''; $('path').title = $('path').textContent;
+      activePath = tabs.find(t => t.id === active)?.display || ''; showPath();
       for (const id of cache.keys()) if (!tabs.some(t => t.id === id)) cache.delete(id);
       if (active == null) { generation++; content.replaceChildren(); find.clear(); $('empty').hidden = false; }
       else if (active !== previous) {
@@ -256,38 +330,64 @@ window.receive = message => {
     case 'invalidate': invalidate(message.ids, message.missing); break;
     case 'command': command(message.command); break;
     case 'anchor': anchor = message; applyAnchor(); break;
+    case 'linkContextAction':
+      if (message.action === 'open') followLink(message.id, message.href);
+      break;
     case 'copy': navigator.clipboard.writeText(message.text).catch(report); break;
-    case 'color': {
-      const input = $(message.field); if (['base', 'accent'].includes(message.field)) { input.value = message.value; previewCustom(); } break;
-    }
+    case 'color': if (colorNames.includes(message.field)) { $(`pick-${message.field}`).value = message.value; $(`hex-${message.field}`).value = message.value; previewCustom(); } break;
   }
 };
 
 function openCustom() {
-  preview = { theme, colors: [...colors] }; $('base').value = colors[0]; $('accent').value = colors[1];
+  preview = { theme, colors: [...colors], customColors: { ...customColors } };
+  editColors = { ...palette(...colors), ...customColors };
+  for (const field of colorNames) {
+    $(`hex-${field}`).value = editColors[field];
+    $(`pick-${field}`).value = editColors[field];
+  }
   $('custom').showModal(); previewCustom();
 }
 function previewCustom() {
-  const values = [$('base').value, $('accent').value];
-  if (!values.every(c => /^#[0-9a-f]{6}$/i.test(c))) { $('contrast').textContent = 'Use two valid #RRGGBB colors.'; return; }
-  currentPalette = applyTheme('custom', values);
-  const ratio = contrast(...values);
-  $('contrast').textContent = ratio < 4.5 ? `Raw accent contrast is ${ratio.toFixed(2)}:1. Link/text colors are adjusted to meet 4.5:1.` : `Base/accent contrast: ${ratio.toFixed(2)}:1.`;
+  for (const field of colorNames) {
+    const value = $(`hex-${field}`).value;
+    if (!/^#[0-9a-f]{6}$/i.test(value)) { $('contrast').textContent = `Enter a valid #RRGGBB value for ${field}.`; return; }
+    editColors[field] = value.toLowerCase();
+    $(`pick-${field}`).value = editColors[field];
+  }
+  currentPalette = applyTheme('custom', [editColors.base, editColors.accent], editColors);
+  const surfaces = ['base', 'surface', 'code', 'stripe'];
+  const foregrounds = ['text', 'muted', 'link', 'syntax', 'number', 'comment'];
+  const ratios = foregrounds.flatMap(fg => surfaces.map(bg => contrast(editColors[fg], editColors[bg])));
+  ratios.push(contrast(editColors['selection-text'], editColors.selection));
+  const minimum = Math.min(...ratios);
+  $('contrast').textContent = minimum < 4.5
+    ? `Contrast warning: lowest text contrast is ${minimum.toFixed(2)}:1; WCAG AA recommends at least 4.5:1.`
+    : `Text contrast is at least 4.5:1 (lowest: ${minimum.toFixed(2)}:1).`;
   clearTimeout(previewTimer);
   if (cache.get(active)?.needs.mermaid) previewTimer = setTimeout(() => { saveScroll(); void display(cache.get(active)); }, 200);
 }
 $('custom').addEventListener('close', () => {
   clearTimeout(previewTimer);
   if (!preview) return;
-  if ($('custom').returnValue === 'apply') { theme = 'custom'; colors = [$('base').value.toLowerCase(), $('accent').value.toLowerCase()]; persistPreferences(); }
-  else { theme = preview.theme; colors = preview.colors; }
-  preview = null; preferences(); if (cache.has(active)) void display(cache.get(active));
+  if ($('custom').returnValue === 'apply') {
+    if (resetSepia) { theme = 'sepia'; customColors = {}; }
+    else { theme = 'custom'; customColors = { ...editColors }; }
+    colors = [editColors.base, editColors.accent]; persistPreferences();
+  } else { theme = preview.theme; colors = preview.colors; customColors = preview.customColors; }
+  preview = null; resetSepia = false; preferences(); if (cache.has(active)) void display(cache.get(active));
 });
-for (const field of ['base', 'accent']) {
-  $(field).oninput = previewCustom;
-  $(`pick-${field}`).onclick = () => send({ type: 'pickColor', field, value: $(field).value });
+for (const field of colorNames) {
+  $(`hex-${field}`).oninput = () => { resetSepia = false; previewCustom(); };
+  $(`pick-${field}`).oninput = () => { resetSepia = false; $(`hex-${field}`).value = $(`pick-${field}`).value; previewCustom(); };
 }
-$('complement').onclick = () => { if (/^#[0-9a-f]{6}$/i.test($('base').value)) { $('accent').value = complement($('base').value); previewCustom(); } };
+$('reset-sepia').onclick = () => {
+  editColors = palette('#d9c48e', '#737519'); resetSepia = true;
+  for (const field of colorNames) {
+    $(`hex-${field}`).value = editColors[field];
+    $(`pick-${field}`).value = editColors[field];
+  }
+  previewCustom();
+};
 for (const id of ['open', 'empty-open', 'new']) $(id).onclick = () => command('open');
 $('left').onclick = () => tabstrip.scrollBy({ left: -180 }); $('right').onclick = () => tabstrip.scrollBy({ left: 180 });
 new ResizeObserver(updateArrows).observe(tabstrip);
@@ -302,17 +402,50 @@ viewport.addEventListener('pointerdown', () => { scrollEpoch++; restoring = fals
 viewport.addEventListener('scroll', () => { clearTimeout(scrollTimer); if (!restoring) scrollTimer = setTimeout(saveScroll, 150); }, { passive: true });
 content.addEventListener('click', event => {
   const link = event.target.closest('a[href]'); if (!link) return;
-  event.preventDefault(); const href = link.getAttribute('href');
-  if (href.startsWith('#')) { anchor = { id: active, anchor: href.slice(1) }; applyAnchor(); }
-  else send({ type: 'link', id: active, href });
+  event.preventDefault(); followLink(active, link.getAttribute('href'));
+});
+content.addEventListener('contextmenu', event => {
+  const link = event.target.closest('a[href]'); if (!link) return;
+  event.preventDefault();
+  const href = link.getAttribute('href');
+  send({ type: 'linkContext', id: active, href, address: linkAddress(href), text: link.innerText || link.textContent || '' });
+});
+function showPath() {
+  $('path').textContent = activePath; $('path').title = activePath;
+}
+function showLink(link) {
+  const target = linkAddress(link.getAttribute('href') || '');
+  $('path').textContent = target; $('path').title = target;
+}
+function linkAddress(href) {
+  let target = href;
+  if (!/^(?:https?:|mailto:)/i.test(target) && activePath) {
+    try { target = new URL(target, `file:///${activePath.replace(/\\/g, '/')}`).href; } catch {}
+  }
+  return target;
+}
+function followLink(id, href) {
+  if (href.startsWith('#')) {
+    if (active !== id) send({ type: 'activate', id });
+    anchor = { id, anchor: href.slice(1) }; applyAnchor();
+  } else send({ type: 'link', id, href });
+}
+for (const eventName of ['pointerover', 'focusin']) content.addEventListener(eventName, event => {
+  const link = event.target.closest('a[href]');
+  if (link && !link.contains(event.relatedTarget)) showLink(link);
+});
+for (const eventName of ['pointerout', 'focusout']) content.addEventListener(eventName, event => {
+  const link = event.target.closest('a[href]');
+  if (link && !link.contains(event.relatedTarget)) showPath();
 });
 document.addEventListener('keydown', event => {
   let action;
   if (event.ctrlKey && !event.altKey) {
     const key = event.key.toLowerCase();
     if (key === 'tab') { event.preventDefault(); cycle(event.shiftKey ? -1 : 1); return; }
-    action = { o: 'open', t: 'open-new', w: 'close', f: 'find', '=': 'zoom-in', '+': 'zoom-in', '-': 'zoom-out', '0': 'zoom-reset' }[key];
-    if (['s', 'p', 'e', 'u'].includes(key)) event.preventDefault();
+    action = { o: 'open', t: 'open-new', w: 'close', f: 'find', p: 'print', '=': 'zoom-in', '+': 'zoom-in', '-': 'zoom-out', '0': 'zoom-reset' }[key];
+    if (key === 's' && event.shiftKey) action = 'save-pdf';
+    if (['s', 'e', 'u'].includes(key)) event.preventDefault();
   } else if (event.key === 'F3') action = event.shiftKey ? 'find-previous' : 'find-next';
   else if (event.key === 'F5') action = 'reload';
   else if (event.key === 'Escape' && !$('find-bar').hidden && !$('custom').open) { event.preventDefault(); hideFind(); }

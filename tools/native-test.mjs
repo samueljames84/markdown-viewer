@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, readFile, rename, unlink, mkdir, rm } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdtemp, writeFile, readFile, rename, unlink, mkdir, rm, copyFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,12 @@ const documents = resolve(dir, 'documents'); await mkdir(documents);
 const first = resolve(documents, 'first.md'), second = resolve(documents, 'second.md');
 await writeFile(first, '# First\n\n' + 'Long content for scroll.\n\n'.repeat(250));
 await writeFile(second, '# Second\n\nAnother document.');
+const picture = process.env.MDVIEWER_TEST_IMAGE ? resolve(documents, 'provided-picture.png') : null;
+const pictureDoc = picture ? resolve(documents, 'picture.md') : null;
+if (picture && pictureDoc) {
+  await copyFile(process.env.MDVIEWER_TEST_IMAGE, picture);
+  await writeFile(pictureDoc, '# Picture test\n\n![Provided picture](provided-picture.png)\n');
+}
 const env = { ...process.env, APPDATA: appdata, LOCALAPPDATA: local, MDVIEWER_DEBUG_PORT: '19347' };
 const exe = resolve(root, 'target', 'x86_64-pc-windows-msvc', 'debug', 'mdviewer.exe');
 await mkdir(resolve(appdata, 'MdViewer'));
@@ -30,6 +36,14 @@ async function connect(child, port = 19347) {
   }
   return chromium.connectOverCDP(`http://127.0.0.1:${port}`);
 }
+async function waitSettings(predicate) {
+  for (let i = 0; i < 50; i++) {
+    const settings = JSON.parse(await readFile(resolve(appdata, 'MdViewer', 'settings.json'), 'utf8'));
+    if (predicate(settings)) return settings;
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error('Timed out waiting for settings to update');
+}
 try {
   child = spawn(exe, [], { env, stdio: 'pipe' });
   child.stderr.on('data', data => process.stderr.write(data));
@@ -44,6 +58,12 @@ try {
   assert.ok(page, 'native application page');
   await page.locator('#content h1').waitFor();
   assert.equal(await page.locator('#content h1').innerText(), 'First');
+  await page.waitForFunction(path => document.getElementById('path').textContent === path, first);
+  assert.equal(execFileSync('powershell.exe', ['-NoProfile', '-Command', `(Get-Process -Id ${child.pid}).MainWindowTitle`], {encoding:'utf8'}).trim(), `MdViewer | Path: ${first}`);
+  await page.keyboard.press('Control+Shift+s');
+  await page.locator('#pdf-orientation').waitFor({timeout:5000});
+  assert.equal(await page.locator('#pdf-orientation').inputValue(), 'portrait');
+  await page.locator('#print-cancel').click();
   const initialViewport = await page.evaluate(() => ({width:innerWidth,height:innerHeight}));
   assert.equal(await page.locator('.tab').count(), 1, 'missing saved file silently discarded');
   const requests = [];
@@ -80,12 +100,35 @@ try {
   await page.waitForFunction(() => document.querySelector('#content h1')?.textContent === 'Second changed');
   await page.keyboard.press('Control+w');
   await page.waitForFunction(() => document.querySelectorAll('.tab').length === 1);
+  if (pictureDoc) {
+    const pictureLaunch = spawn(exe, [pictureDoc], {env, stdio:'pipe'});
+    assert.equal(await new Promise(resolve => pictureLaunch.once('exit', resolve)), 0);
+    await page.waitForFunction(() => {
+      const image = document.querySelector('#content img[alt="Provided picture"]');
+      return image?.complete && image.naturalWidth > 0;
+    }, {timeout:10000});
+    console.log(`PASS image: loaded provided PNG (${(await readFile(picture)).length} bytes) through the native local-image protocol.`);
+    await page.keyboard.press('Control+w');
+    await page.waitForFunction(() => document.querySelectorAll('.tab').length === 1);
+  }
   await page.keyboard.press('Control+=');
   await page.waitForFunction(() => document.getElementById('zoom').textContent === '110%');
+  await page.evaluate(() => window.receive({type:'command',command:'custom'}));
+  await page.locator('#hex-link').fill('#fedcba');
+  await page.locator('button[value=apply]').click();
+  let saved = await waitSettings(settings => settings.custom_colors?.link === '#fedcba');
+  await page.evaluate(() => window.receive({type:'command',command:'reset-theme'}));
+  saved = await waitSettings(settings => settings.theme === 'sepia' && Object.keys(settings.custom_colors || {}).length === 0);
   const featureLaunch = spawn(exe, [resolve(root, 'tests', 'fixtures', 'features.md')], {env, stdio:'pipe'});
   assert.equal(await new Promise(resolve => featureLaunch.once('exit', resolve)), 0);
   await page.locator('#content .mermaid svg').waitFor({timeout:30000});
   assert.ok(await page.locator('#content .katex').count() >= 2, 'native optional renderer assets');
+  await page.locator('#content a[href="plain.md"]').click();
+  await page.waitForFunction(() => document.querySelector('#content h1')?.textContent === 'Plain document');
+  assert.equal(await page.locator('.tab').count(), 3, 'relative Markdown link opens a new tab');
+  await page.waitForFunction(path => document.getElementById('path').textContent === path, resolve(root, 'tests', 'fixtures', 'plain.md'));
+  await page.keyboard.press('Control+w');
+  await page.waitForFunction(() => document.querySelector('#content h1')?.textContent === 'MdViewer feature gallery');
   await page.keyboard.press('Control+w');
   await page.waitForFunction(() => document.querySelectorAll('.tab').length === 1);
   await page.evaluate(() => window.receive({ type:'command', command:'exit' }));
@@ -94,6 +137,7 @@ try {
   const settings = JSON.parse(await readFile(resolve(appdata, 'MdViewer', 'settings.json'), 'utf8'));
   assert.equal(settings.tabs.length, 1);
   assert.equal(settings.zoom, 110);
+  assert.equal(settings.theme, 'sepia');
   await browser.close().catch(() => {});
   child = spawn(exe, [], {env:{...env,MDVIEWER_DEBUG_PORT:'19348'},stdio:'pipe'});
   browser = await connect(child, 19348);

@@ -41,8 +41,15 @@ export function complement(color) {
   [r, g, b] = h < 1 ? [c, x, 0] : h < 2 ? [x, c, 0] : h < 3 ? [0, c, x] : h < 4 ? [0, x, c] : h < 5 ? [x, 0, c] : [c, 0, x];
   return hex([r, g, b].map(v => (v + m) * 255));
 }
-export function applyTheme(mode, colors) {
-  const values = mode === 'dark' ? palette('#1e2025', '#8eb8fa') : mode === 'custom' ? palette(...colors) : palette('#ffffff', '#2864b4');
+export function applyTheme(mode, colors, overrides = {}) {
+  const values = mode === 'dark' ? palette('#1e2025', '#8eb8fa')
+    : mode === 'sepia' ? palette('#d9c48e', '#737519')
+      : mode === 'custom' ? palette(...colors) : palette('#ffffff', '#2864b4');
+  if (mode === 'custom') {
+    for (const [name, value] of Object.entries(overrides)) {
+      if (Object.hasOwn(values, name) && /^#[\da-f]{6}$/i.test(value)) values[name] = value.toLowerCase();
+    }
+  }
   for (const [name, value] of Object.entries(values)) document.documentElement.style.setProperty(`--${name}`, value);
   document.documentElement.style.colorScheme = luminance(values.base) < 0.18 ? 'dark' : 'light';
   return values;

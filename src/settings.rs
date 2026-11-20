@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::os::windows::ffi::OsStrExt;
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -19,6 +20,7 @@ pub struct Settings {
     pub active: usize,
     pub theme: String,
     pub colors: [String; 2],
+    pub custom_colors: BTreeMap<String, String>,
     pub zoom: i32,
     pub window: WindowState,
 }
@@ -31,6 +33,7 @@ impl Default for Settings {
             active: 0,
             theme: "light".into(),
             colors: ["#ffffff".into(), "#2864b4".into()],
+            custom_colors: BTreeMap::new(),
             zoom: 100,
             window: WindowState::default(),
         }
@@ -87,7 +90,7 @@ pub fn load(dir: &Path) -> Result<Settings> {
             match result {
                 Ok(mut s) => {
                     s.zoom = s.zoom.clamp(50, 300) / 10 * 10;
-                    if !["light", "dark", "custom"].contains(&s.theme.as_str()) {
+                    if !["light", "dark", "sepia", "custom"].contains(&s.theme.as_str()) {
                         s.theme = "light".into();
                     }
                     for color in &mut s.colors {
@@ -97,6 +100,28 @@ pub fn load(dir: &Path) -> Result<Settings> {
                         {
                             *color = "#2864b4".into();
                         }
+                        s.custom_colors.retain(|name, color| {
+                            [
+                                "base",
+                                "text",
+                                "surface",
+                                "accent",
+                                "link",
+                                "border",
+                                "code",
+                                "stripe",
+                                "selection",
+                                "selection-text",
+                                "muted",
+                                "syntax",
+                                "number",
+                                "comment",
+                            ]
+                            .contains(&name.as_str())
+                                && color.len() == 7
+                                && color.starts_with('#')
+                                && color[1..].bytes().all(|c| c.is_ascii_hexdigit())
+                        });
                     }
                     Ok(s)
                 }
@@ -187,6 +212,20 @@ mod tests {
         let restored: SavedTab = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(tab.path, restored.path);
         assert_eq!(tab.scroll, restored.scroll);
+    }
+
+    #[test]
+    fn older_settings_default_to_no_custom_color_overrides() {
+        let settings: Settings = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "tabs": [],
+            "active": 0,
+            "theme": "light",
+            "colors": ["#ffffff", "#2864b4"],
+            "zoom": 100
+        }))
+        .unwrap();
+        assert!(settings.custom_colors.is_empty());
     }
 
     #[test]

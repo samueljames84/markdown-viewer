@@ -15,6 +15,8 @@ Use copies of documents; MdViewer must never alter their contents or timestamps.
   is correct. Help > About shows app and actual WebView2 versions.
 - [ ] Resize and maximize: native menu, tabs, optional find, tiny status bar;
   content fills all remaining width/height with roughly 14 px side gutters.
+- [ ] With different tabs active, title bar reads `MdViewer | Path: <absolute
+  full file path>` and changes when switching/closing tabs.
 - [ ] Large tables/code have their own horizontal overflow; content scrolls
   vertically without a centered/max-width column.
 - [ ] Move between 100%, 150% and 200% DPI monitors. Close/relaunch: normal bounds
@@ -65,25 +67,43 @@ Use copies of documents; MdViewer must never alter their contents or timestamps.
 - [ ] Named code languages highlight; unknown/plain code remains readable.
   Visit a plain-only document first: optional renderers have not loaded.
 - [ ] Relative Markdown links open/deduplicate tabs, including `..` siblings and
-  fragments. Same-document anchors/TOC/footnotes scroll correctly.
+  fragments. A new relative target opens as a new tab; an already-open target
+  activates its existing tab. Same-document anchors/TOC/footnotes scroll correctly.
+- [ ] Right-click a link: Open Link follows it, Copy Link Address puts its
+  resolved URL on the clipboard, and Copy Link Text copies the rendered label.
 - [ ] Explicit HTTP/HTTPS clicks open the browser, not an embedded web page.
   JavaScript, file, data and other schemes are blocked.
+- [ ] Hover and keyboard-focus document links: the bottom status bar shows the
+  link target URL and restores the active document path on leaving the link.
 - [ ] Relative raster images within the document folder resolve, including spaces
   and Unicode. Remote images, document SVG, traversal and junction escapes do
   not load. UNC and mapped-network documents are rejected explicitly.
-- [ ] Select/copy text normally. No editor, save, save-as, print, split view,
-  export/PDF, recent-files list, plugin manager or auto-update is available.
-  Ctrl+S/Ctrl+P and browser context menus/devtools do not expose those features.
+- [ ] Select/copy text normally. No editor, Markdown save/save-as, split view,
+  recent-files list, plugin manager or auto-update is available. Ctrl+S and
+  browser context menus/devtools do not expose those features.
+- [ ] In Dark or Sepia with zoom above 100%, select File > Print or Ctrl+P.
+  Toggle Add page numbers, then choose a printer. Verify only the document
+  prints on white, with a centered `Page X of Y` footer only when selected. Cancel the
+  printer dialog and verify the viewer can print again.
+- [ ] Use File > Save as PDF or Ctrl+Shift+S on a multi-page document containing
+  a local image, a table, math and a Mermaid diagram. Verify Portrait is selected
+  each time; export both orientations and verify A4, 15 mm margins, white
+  pages, correct numbering on every page when enabled, and no viewer chrome.
+  Cancel the file picker, try an invalid destination and verify failures are
+  reported. Verify the input file, current tab and theme do not change.
 
 ## Theme, zoom and find
 
-- [ ] View > Theme Light and Dark update text, surfaces, links, blockquotes,
-  stripes, code, selection, highlights, scrollbars and visible Mermaid diagrams.
-- [ ] Custom opens native color pickers and accepts `#RRGGBB`. Invalid hex is
-  clearly rejected; Suggest Complementary rotates hue by 180 degrees.
-- [ ] Live preview updates the palette and diagrams. Low-contrast chosen accents
-  warn; derived text remains readable (AA >=4.5:1). Apply persists; Cancel/Esc
-  restores the prior committed theme.
+- [ ] View > Theme Light, Dark and Sepia update text, surfaces, links,
+  blockquotes, stripes, code, selection, highlights and visible Mermaid diagrams.
+- [ ] Custom displays 14 labeled color pickers and hex boxes: page background,
+  text, surface, accent, links, borders, code background, table stripe, selection
+  background/text, muted text and syntax keyword/string-number/comment colors.
+- [ ] Live preview updates the palette and diagrams. Invalid hex is rejected;
+  contrast below WCAG AA 4.5:1 produces a warning. Apply persists; Close/Esc
+  restores the previous theme and colors. Reset to Sepia fills every color field
+  and updates the preview without closing the dialog; Apply commits Sepia and
+  Close discards it. The theme-menu reset selects Sepia directly.
 - [ ] Zoom menu, Ctrl+=, Ctrl++, Ctrl+-, Ctrl+0 and Ctrl+wheel agree, step by 10%,
   clamp at 50/300 and persist. UI remains compact; gutters scale with content.
 - [ ] Ctrl+F reveals a slim bar. Typing updates all matches/count; current match

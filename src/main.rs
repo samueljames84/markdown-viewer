@@ -13,6 +13,7 @@ enum Event {
     Open(Vec<std::path::PathBuf>, bool),
     Changed(Vec<std::path::PathBuf>),
     Error(String),
+    PdfFinished(Result<String, String>),
 }
 
 fn main() {

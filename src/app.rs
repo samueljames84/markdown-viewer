@@ -21,6 +21,7 @@ use serde::Deserialize;
 use serde_json::json;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, mpsc},
@@ -33,7 +34,10 @@ use tao::{
     platform::windows::{EventLoopBuilderExtWindows, WindowExtWindows},
     window::WindowBuilder,
 };
-use webview2_com::{Microsoft::Web::WebView2::Win32::*, WebResourceRequestedEventHandler};
+use webview2_com::{
+    Microsoft::Web::WebView2::Win32::*, PrintToPdfCompletedHandler,
+    WebResourceRequestedEventHandler,
+};
 use wry::{WebView, WebViewBuilder, WebViewBuilderExtWindows, WebViewExtWindows};
 
 const ORIGIN: &str = "https://mdv.localhost";
@@ -65,11 +69,19 @@ enum Ipc {
     Preferences {
         theme: String,
         colors: [String; 2],
+        #[serde(rename = "customColors")]
+        custom_colors: BTreeMap<String, String>,
         zoom: i32,
     },
     Link {
         id: u64,
         href: String,
+    },
+    LinkContext {
+        id: u64,
+        href: String,
+        address: String,
+        text: String,
     },
     PickColor {
         field: String,
@@ -82,6 +94,25 @@ enum Ipc {
         stage: String,
     },
     ExitReady,
+    DocumentOutput {
+        id: u64,
+        mode: OutputMode,
+        orientation: PdfOrientation,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum OutputMode {
+    Print,
+    Pdf,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum PdfOrientation {
+    Portrait,
+    Landscape,
 }
 
 fn menus() -> Result<Menu> {
@@ -96,6 +127,8 @@ fn menus() -> Result<Menu> {
         ("open-new", "&New Tab", Some(Code::KeyT)),
         ("close", "&Close Tab", Some(Code::KeyW)),
         ("close-all", "Close All Tabs", None),
+        ("print", "&Print...", Some(Code::KeyP)),
+        ("save-pdf", "Save as PDF...", Some(Code::KeyS)),
         ("associate", "Set as Default for .md...", None),
         ("unassociate", "Remove Association", None),
         ("exit", "E&xit", None),
@@ -104,7 +137,14 @@ fn menus() -> Result<Menu> {
             id,
             label,
             true,
-            key.map(|k| Accelerator::new(Some(ctrl), k)),
+            key.map(|k| {
+                let mods = if id == "save-pdf" {
+                    ctrl | Modifiers::SHIFT
+                } else {
+                    ctrl
+                };
+                Accelerator::new(Some(mods), k)
+            }),
         ))?;
     }
     for (id, label, key, mods) in [
@@ -123,7 +163,9 @@ fn menus() -> Result<Menu> {
     for (id, label) in [
         ("light", "Light"),
         ("dark", "Dark"),
+        ("sepia", "Sepia"),
         ("custom", "Custom..."),
+        ("reset-theme", "Reset Theme to Sepia"),
     ] {
         theme.append(&MenuItem::with_id(id, label, true, None))?;
     }
@@ -167,7 +209,7 @@ fn emit(view: &WebView, value: serde_json::Value) -> Result<()> {
 fn tabs(view: &WebView, docs: &Documents, prefs: &Settings) -> Result<()> {
     emit(
         view,
-        json!({"type":"tabs","tabs":docs.tabs,"active":docs.active,"theme":prefs.theme,"colors":prefs.colors,"zoom":prefs.zoom}),
+        json!({"type":"tabs","tabs":docs.tabs,"active":docs.active,"theme":prefs.theme,"colors":prefs.colors,"customColors":prefs.custom_colors,"zoom":prefs.zoom}),
     )
 }
 
@@ -307,6 +349,91 @@ fn restrict_requests(view: &WebView) -> Result<()> {
 enum Save {
     Later(Settings),
     Now(Settings, mpsc::Sender<std::result::Result<(), String>>),
+}
+
+struct StagedPdf(PathBuf);
+
+impl Drop for StagedPdf {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn export_pdf(
+    view: &WebView,
+    destination: PathBuf,
+    orientation: PdfOrientation,
+    proxy: tao::event_loop::EventLoopProxy<Event>,
+) -> Result<()> {
+    use ::windows::Win32::Storage::FileSystem::{MOVEFILE_REPLACE_EXISTING, MoveFileExW};
+    use ::windows::core::PCWSTR;
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_nanos();
+    let staging =
+        destination.with_file_name(format!(".mdviewer-{}-{stamp}.pdf", std::process::id()));
+    fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&staging)?;
+    let staging = StagedPdf(staging);
+    let path = windows::wide(&staging.0);
+    let completed = PrintToPdfCompletedHandler::create(Box::new(move |error, success| {
+        let result = (|| -> Result<String> {
+            error?;
+            anyhow::ensure!(success, "WebView2 did not produce a PDF");
+            let source = windows::wide(&staging.0);
+            let target = windows::wide(&destination);
+            unsafe {
+                MoveFileExW(
+                    PCWSTR(source.as_ptr()),
+                    PCWSTR(target.as_ptr()),
+                    MOVEFILE_REPLACE_EXISTING,
+                )
+            }
+            .context("Could not place the PDF at the selected destination")?;
+            Ok(format!("PDF saved: {}", destination.display()))
+        })();
+        let _ = proxy.send_event(Event::PdfFinished(
+            result.map_err(|error| format!("{error:#}")),
+        ));
+        Ok(())
+    }));
+    unsafe {
+        let settings = view
+            .environment()
+            .cast::<ICoreWebView2Environment6>()?
+            .CreatePrintSettings()?;
+        settings.SetOrientation(match orientation {
+            PdfOrientation::Portrait => COREWEBVIEW2_PRINT_ORIENTATION_PORTRAIT,
+            PdfOrientation::Landscape => COREWEBVIEW2_PRINT_ORIENTATION_LANDSCAPE,
+        })?;
+        settings.SetPageWidth(210.0 / 25.4)?;
+        settings.SetPageHeight(297.0 / 25.4)?;
+        for set in [
+            ICoreWebView2PrintSettings::SetMarginTop,
+            ICoreWebView2PrintSettings::SetMarginBottom,
+            ICoreWebView2PrintSettings::SetMarginLeft,
+            ICoreWebView2PrintSettings::SetMarginRight,
+        ] {
+            set(&settings, 15.0 / 25.4)?;
+        }
+        settings.SetShouldPrintHeaderAndFooter(false)?;
+        view.webview().cast::<ICoreWebView2_7>()?.PrintToPdf(
+            PCWSTR(path.as_ptr()),
+            &settings,
+            &completed,
+        )?;
+    }
+    Ok(())
+}
+
+struct LinkContext {
+    id: u64,
+    href: String,
+    address: String,
+    text: String,
 }
 
 pub fn run() -> Result<()> {
@@ -600,7 +727,10 @@ pub fn run() -> Result<()> {
     );
     let mut ready = false;
     let mut context_tab = None;
+    let mut context_link: Option<LinkContext> = None;
     let mut exiting = false;
+    let mut pdf_pending = false;
+    let mut window_title = String::new();
     event_loop.run(move |event, _, control| {
         let _keep_alive = (&instance, &menu, &context);
         *control = ControlFlow::Wait;
@@ -628,6 +758,16 @@ pub fn run() -> Result<()> {
                     settings::log(&dir, &error);
                     rfd::MessageDialog::new().set_title("MdViewer").set_level(rfd::MessageLevel::Error).set_description(error).show();
                 }
+                TaoEvent::UserEvent(Event::PdfFinished(result)) => {
+                    pdf_pending = false;
+                    match result {
+                        Ok(message) => emit(&view, json!({"type":"outputDone","message":message}))?,
+                        Err(error) => {
+                            emit(&view, json!({"type":"outputDone","message":"PDF export failed."}))?;
+                            anyhow::bail!("PDF export failed: {error}");
+                        }
+                    }
+                }
                 TaoEvent::UserEvent(Event::Changed(paths)) => {
                     if ready {
                         let ids: Vec<_> = docs.tabs.iter().filter(|t| paths.contains(&t.path)).map(|t| t.id).collect();
@@ -654,10 +794,12 @@ pub fn run() -> Result<()> {
                             docs.tabs.sort_by_key(|t| ids.iter().position(|id| *id == t.id));
                             tabs(&view, &docs, &prefs)?; changed = true;
                         }
-                        Ipc::Preferences { theme, colors, zoom } => {
-                            anyhow::ensure!(["light","dark","custom"].contains(&theme.as_str()) && (50..=300).contains(&zoom) && zoom % 10 == 0, "Invalid preferences");
+                        Ipc::Preferences { theme, colors, custom_colors, zoom } => {
+                            anyhow::ensure!(["light","dark","sepia","custom"].contains(&theme.as_str()) && (50..=300).contains(&zoom) && zoom % 10 == 0, "Invalid preferences");
                             anyhow::ensure!(colors.iter().all(|c| c.len() == 7 && c.starts_with('#') && c[1..].bytes().all(|b| b.is_ascii_hexdigit())), "Invalid colors");
-                            prefs.theme = theme; prefs.colors = colors; prefs.zoom = zoom; changed = true;
+                            let allowed = ["base","text","surface","accent","link","border","code","stripe","selection","selection-text","muted","syntax","number","comment"];
+                            anyhow::ensure!(custom_colors.iter().all(|(name,color)| allowed.contains(&name.as_str()) && color.len() == 7 && color.starts_with('#') && color[1..].bytes().all(|b| b.is_ascii_hexdigit())), "Invalid custom theme colors");
+                            prefs.theme = theme; prefs.colors = colors; prefs.custom_colors = custom_colors; prefs.zoom = zoom; changed = true;
                         }
                         Ipc::Context { id } => {
                             if docs.tabs.iter().any(|t| t.id == id) {
@@ -683,16 +825,73 @@ pub fn run() -> Result<()> {
                                 emit(&view, json!({"type":"anchor","id":opened,"anchor":anchor}))?; changed = true;
                             }
                         }
+                        Ipc::LinkContext { id, href, address, text } => {
+                            anyhow::ensure!(docs.tabs.iter().any(|tab| tab.id == id), "Link source document is closed");
+                            anyhow::ensure!(href.len() <= 16 * 1024 && address.len() <= 32 * 1024 && text.len() <= 64 * 1024, "Link context is too large");
+                            context_link = Some(LinkContext { id, href, address, text });
+                            let popup = Menu::new();
+                            for (id, label) in [
+                                ("link-open", "Open Link"),
+                                ("link-copy-address", "Copy Link Address"),
+                                ("link-copy-text", "Copy Link Text"),
+                            ] {
+                                popup.append(&MenuItem::with_id(id, label, true, None))?;
+                            }
+                            unsafe { popup.show_context_menu_for_hwnd(window.hwnd() as _, None); }
+                        }
                         Ipc::PickColor { field, value } => {
                             if let Some(color) = windows::color(window.hwnd(), &value)? { emit(&view, json!({"type":"color","field":field,"value":color}))?; }
                         }
                         Ipc::Diagnostic { message } => { settings::log(&dir,&format!("Renderer: {message}")); }
                         Ipc::Metric { stage } => { settings::log(&dir,&format!("METRIC {stage} {} ms",started.elapsed().as_millis())); }
                         Ipc::ExitReady => exiting = true,
+                        Ipc::DocumentOutput { id, mode, orientation } => {
+                            let output = (|| -> Result<bool> {
+                                anyhow::ensure!(!pdf_pending, "A PDF export is already running");
+                                let tab = docs.tabs.iter().find(|t| t.id == id && Some(id) == docs.active)
+                                    .context("The active document changed. Please try again.")?;
+                                match mode {
+                                    OutputMode::Print => unsafe {
+                                        view.webview().cast::<ICoreWebView2_16>()?
+                                            .ShowPrintUI(COREWEBVIEW2_PRINT_DIALOG_KIND_SYSTEM)?;
+                                        Ok(true)
+                                    },
+                                    OutputMode::Pdf => {
+                                        let name = Path::new(&tab.name).with_extension("pdf");
+                                        let Some(path) = rfd::FileDialog::new()
+                                            .set_parent(&window)
+                                            .set_title("Save as PDF")
+                                            .add_filter("PDF", &["pdf"])
+                                            .set_file_name(name.to_string_lossy())
+                                            .save_file() else { return Ok(false); };
+                                        anyhow::ensure!(path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")), "Choose a .pdf filename");
+                                        anyhow::ensure!(!docs.tabs.iter().any(|t| same_file::is_same_file(&path, &t.path).unwrap_or(false)), "The PDF destination is an open document");
+                                        export_pdf(&view, path, orientation, proxy.clone())?;
+                                        pdf_pending = true;
+                                        Ok(true)
+                                    }
+                                }
+                            })();
+                            if !matches!(output, Ok(true)) {
+                                emit(&view, json!({"type":"outputDone","message":""}))?;
+                            }
+                            output.context("Could not print or save the document")?;
+                        }
                     }
                 }
                 TaoEvent::UserEvent(Event::Menu(command)) => {
                     match command.as_str() {
+                        "link-open" => {
+                            if let Some(link) = context_link.take() {
+                                emit(&view, json!({"type":"linkContextAction","action":"open","id":link.id,"href":link.href}))?;
+                            }
+                        }
+                        "link-copy-address" => {
+                            if let Some(link) = context_link.take() { windows::clipboard(window.hwnd(), &link.address)?; }
+                        }
+                        "link-copy-text" => {
+                            if let Some(link) = context_link.take() { windows::clipboard(window.hwnd(), &link.text)?; }
+                        }
                         "open" | "open-new" => {
                             if let Some(files) = rfd::FileDialog::new().set_title("Open Markdown files").add_filter("Markdown and text", &["md","markdown","mdown","txt"]).add_filter("All files",&["*"]).pick_files() {
                                 let _ = proxy.send_event(Event::Open(files, true));
@@ -714,16 +913,27 @@ pub fn run() -> Result<()> {
                         "context-copy" => { if let Some(t) = docs.tabs.iter().find(|t| Some(t.id) == context_tab) { windows::clipboard(window.hwnd(), &t.display)?; } }
                         "context-folder" => { if let Some(t) = docs.tabs.iter().find(|t| Some(t.id) == context_tab) { windows::launch(t.path.parent().context("No containing folder")?)?; } }
                         _ => {
-                            anyhow::ensure!(["close","close-all","exit","zoom-in","zoom-out","zoom-reset","light","dark","custom","reload","find","find-next","find-previous"].contains(&command.as_str()),"Unknown command");
+                            anyhow::ensure!(["close","close-all","exit","print","save-pdf","zoom-in","zoom-out","zoom-reset","light","dark","sepia","reset-theme","custom","reload","find","find-next","find-previous"].contains(&command.as_str()),"Unknown command");
                             if ready { emit(&view,json!({"type":"command","command":command}))?; }
                         }
                     }
                 }
                 _ => {}
             }
+            let title = docs.tabs.iter().find(|t| Some(t.id) == docs.active)
+                .map(|tab| format!("MdViewer | Path: {}", tab.display))
+                .unwrap_or_else(|| "MdViewer".into());
+            if title != window_title {
+                window.set_title(&title);
+                window_title = title;
+            }
             if changed {
                 watches.update(docs.tabs.iter().map(|t| t.path.clone()).collect());
                 save_tx.send(Save::Later(snapshot(&docs,&prefs)))?;
+            }
+            if exiting && pdf_pending {
+                exiting = false;
+                anyhow::bail!("Wait for PDF export to finish before closing MdViewer.");
             }
             if exiting {
                 let (tx,rx) = mpsc::channel();

@@ -6,6 +6,37 @@
   <section id="find-bar" hidden aria-label="Find in document"><input id="query" type="search" placeholder="Find in document" aria-label="Find text"><label><input id="case" type="checkbox">Aa</label><span id="count" aria-live="polite">0 of 0</span><button id="previous" title="Previous (Shift+F3)">Previous</button><button id="next" title="Next (F3)">Next</button><button id="close-find" aria-label="Close find">x</button></section>
   <main id="viewport" tabindex="0"><article id="content"></article><section id="empty"><h1>MdViewer</h1><p>Markdown, without the editor.</p><button id="empty-open">Open file</button><p class="muted">Ctrl+O or drop Markdown files here</p></section></main>
   <footer><span id="zoom">100%</span><span id="path"></span><span id="notice" role="status"></span></footer>
-  <dialog id="custom"><form method="dialog"><h2>Custom theme</h2><p>Pick a base and an accent. Readable colors are derived automatically.</p><label>Base <input id="base" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Base hex color"><button type="button" id="pick-base">Choose...</button></label><label>Accent <input id="accent" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Accent hex color"><button type="button" id="pick-accent">Choose...</button></label><button type="button" id="complement">Suggest complementary</button><p id="contrast" role="status"></p><div class="dialog-actions"><button value="cancel" formnovalidate>Cancel</button><button value="apply">Apply</button></div></form></dialog>
+  <article id="print-content" aria-hidden="true" inert></article>
+  <dialog id="print-options"><form>
+    <h2 id="print-heading">Print</h2>
+    <p>Only the active document is included, on a white background.</p>
+    <div id="pdf-format" hidden>
+      <p>A4, 15 mm margins.</p>
+      <label for="pdf-orientation">Orientation
+        <select id="pdf-orientation"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select>
+      </label>
+    </div>
+    <label><input id="print-numbers" type="checkbox"> Add page numbers</label>
+    <p id="print-status" role="status"></p>
+    <div class="dialog-actions"><button type="button" id="print-cancel">Cancel</button><button id="print-submit">Continue</button></div>
+  </form></dialog>
+  <dialog id="custom"><form method="dialog"><h2>Custom theme colors</h2><p>Choose each viewer color. Enter a hex value or use the color picker. Text contrast is checked for accessibility.</p>
+    <div id="theme-colors">
+      <label>Page background <span><input type="color" id="pick-base"><input id="hex-base" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Page background hex value"></span></label>
+      <label>Text <span><input type="color" id="pick-text"><input id="hex-text" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Text hex value"></span></label>
+      <label>Surface (tabs/status) <span><input type="color" id="pick-surface"><input id="hex-surface" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Surface hex value"></span></label>
+      <label>Accent <span><input type="color" id="pick-accent"><input id="hex-accent" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Accent hex value"></span></label>
+      <label>Links <span><input type="color" id="pick-link"><input id="hex-link" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Link hex value"></span></label>
+      <label>Border <span><input type="color" id="pick-border"><input id="hex-border" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Border hex value"></span></label>
+      <label>Code background <span><input type="color" id="pick-code"><input id="hex-code" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Code background hex value"></span></label>
+      <label>Table stripe <span><input type="color" id="pick-stripe"><input id="hex-stripe" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Table stripe hex value"></span></label>
+      <label>Text selection <span><input type="color" id="pick-selection"><input id="hex-selection" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Text selection hex value"></span></label>
+      <label>Selection text <span><input type="color" id="pick-selection-text"><input id="hex-selection-text" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Selection text hex value"></span></label>
+      <label>Muted text <span><input type="color" id="pick-muted"><input id="hex-muted" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Muted text hex value"></span></label>
+      <label>Syntax: keywords <span><input type="color" id="pick-syntax"><input id="hex-syntax" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Syntax keyword hex value"></span></label>
+      <label>Syntax: strings/numbers <span><input type="color" id="pick-number"><input id="hex-number" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Syntax string and number hex value"></span></label>
+      <label>Syntax: comments <span><input type="color" id="pick-comment"><input id="hex-comment" maxlength="7" pattern="#[a-fA-F0-9]{6}" aria-label="Syntax comment hex value"></span></label>
+    </div>
+    <p id="contrast" role="status"></p><div class="dialog-actions"><button type="button" id="reset-sepia">Reset to Sepia</button><button id="close-theme" value="cancel" formnovalidate>Close</button><button value="apply">Apply</button></div></form></dialog>
 </body>
 </html>

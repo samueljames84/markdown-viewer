@@ -2,8 +2,10 @@
 
 A lightweight, **view-only** Markdown viewer for Windows 10/11 x64. Native menus,
 Notepad++-style tabs, full-width content, and offline browser-quality rendering.
-There is no document editor, save command, printing, export, extension system,
+There is no document editor, Markdown save command, extension system,
 telemetry, updater, or installer.
+
+[Release notes](RELEASE_NOTES.md)
 
 ## Build and run
 
@@ -42,21 +44,42 @@ build time.
   Drag tabs to reorder. Right-click for close others/right, copy path, and folder.
   Existing files, including hard-link aliases, are deduplicated.
 - **Ctrl+= / Ctrl++ / Ctrl+- / Ctrl+0**, or **Ctrl+wheel**: content zoom,
-  50–300% in 10% steps. The small status bar shows zoom and the full file path.
+  50–300% in 10% steps. The small status bar shows zoom and the active file
+  path, or a link target while hovering/focusing a document link.
 - **Ctrl+F**: incremental literal find, case toggle, all-match/current-match
   highlights and count. **F3 / Shift+F3**, or Enter/Shift+Enter in the find input:
   next/previous. **Esc** closes find.
 - **F5**: reload. Changes made in other applications reload automatically.
-- **View > Theme**: Light, Dark or Custom. Custom supplies native color pickers,
-  hex entry, a complementary-color suggestion, live preview, Apply and Cancel.
-  Derived text/link/syntax colors meet WCAG AA 4.5:1 against their surfaces;
-  unsuitable raw accents produce a warning and accessible derived colors.
+- **View > Theme**: Light, Dark, Sepia or Custom. Custom provides 14 color
+  controls with color pickers and hex entry: page background, text, surface,
+  accent, links, borders, code background, table stripe, selection background
+  and text, muted text, and syntax keyword/string-number/comment colors. It has
+  live preview, Apply/Close, contrast warnings below the WCAG AA 4.5:1
+  recommendation, and Reset to Sepia. Reset fills every color with the Sepia
+  palette and keeps the dialog open; Apply commits it, while Close discards
+  changes. Sepia is also available directly from the theme menu.
 - Drop supported files onto the window or executable. Additional launches forward
   their arguments to the first instance. Windows foreground restrictions may
   cause taskbar attention instead of stealing focus.
 - Relative Markdown/text links open tabs; fragments scroll within documents.
-  Explicit HTTP/HTTPS clicks open your browser. Local relative images are
-  restricted to the document's own folder and descendants.
+  Right-click a link for Open Link, Copy Link Address or Copy Link Text.
+  Explicit HTTP/HTTPS clicks and Open Link open your browser. Local relative
+  images are restricted to the document's own folder and descendants.
+- The native title bar shows `MdViewer | Path: <absolute file path>` for the active
+  tab. Hovering or keyboard-focusing a document link shows its target URL in the
+  bottom status bar; leaving the link restores the current file path.
+
+### Print and save as PDF
+
+- **File > Print** (`Ctrl+P`) opens print options, then the Windows printer
+  dialog. Choose the printer and its settings there.
+- **File > Save as PDF** (`Ctrl+Shift+S`) exports directly without a PDF printer.
+  Choose **Portrait** or **Landscape**, then select **Choose PDF File...**.
+  Each export starts in Portrait. Both orientations use A4 with 15 mm margins.
+
+Both commands output only the active document on a white background, regardless
+of viewer theme or zoom. **Add page numbers** is off by default; enable it for
+a centered `Page 1 of 10` footer. Neither command changes the original Markdown.
 
 ### Rendering
 
@@ -80,8 +103,9 @@ area and log. There is deliberately no source-editing surface.
 
 Strict CSP prohibits remote scripts, inline scripts, eval, frames and forms.
 WebView2 requests are restricted to the embedded synthetic HTTPS origin;
-permissions, downloads, browser menus, devtools and browser print/save/find/zoom
-commands are disabled. Original HTML cannot supply styles or editable controls.
+permissions, downloads, browser menus, devtools and built-in browser shortcuts
+are disabled. Printing and PDF export use explicit MdViewer commands.
+Original HTML cannot supply styles or editable controls.
 Narrowly sanitized generated KaTeX/Mermaid markup may use inline styles.
 
 Remote images, file/JavaScript/data links, document SVG, UNC/network-drive files,
